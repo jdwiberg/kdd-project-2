@@ -15,10 +15,16 @@ dataframe = kagglehub.dataset_load(
   # https://github.com/Kaggle/kagglehub/blob/main/README.md#kaggledatasetadapterpandas
 )
 
-def regression_pp():
-    df = dataframe.copy()
-    return df
+def regression_pp(): # use BMI for regression
+    # drop rows with missing BMI values, since we can't use them for regression
+    X = dataframe.copy().dropna(subset=['bmi'])
+    y = X.pop('bmi', axis=1)
+    
+    return (X, y)
 
-def classification_pp():
-    df = dataframe.copy()
-    return dataframe
+def classification_pp(): # use stroke for classification
+    # drop rows with missing stroke values, since we can't use them for regression
+    X = dataframe.copy().dropna(subset=['stroke'])
+    y = X.pop('stroke')
+
+    return (X, y)
