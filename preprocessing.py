@@ -19,6 +19,10 @@ dataframe = kagglehub.dataset_load(
 )
 
 def regression_pp(*, include_stroke = True): # use BMI for regression
+    """
+    Preprocesses the dataset for regression tasks. Returns training and testing splits of features and target variable.
+    If include_stroke is False, the 'stroke' feature will be dropped to prevent data leakage when predicting BMI.
+    """
     # drop rows with missing BMI values, since we can't use them for regression
     X = dataframe.copy().dropna(subset=['bmi'])
 
@@ -55,6 +59,10 @@ def regression_pp(*, include_stroke = True): # use BMI for regression
     return X_train, X_test, y_train, y_test
 
 def classification_pp(*, upsample = False): # use stroke for classification
+    """
+    Preprocesses the dataset for classification tasks. Returns training and testing splits of features and target variable.
+    If upsample is True, the minority class in the training split will be upsampled to address class imbalance.
+    """
     X = dataframe.copy()
 
     # remove the single "Other" gender row to keep gender binary
