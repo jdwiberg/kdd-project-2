@@ -1,8 +1,10 @@
 from preprocessing import classification_pp # returns attributes and target (X, y) for regression dataset
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, accuracy_score, ConfusionMatrixDisplay, confusion_matrix
 import matplotlib.pyplot as plt
-
-
+from sklearn.dummy import DummyClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_predict
 
 def classification():
     """
@@ -10,8 +12,48 @@ def classification():
     Use evaluation function to evaluate performance of different models
     """
     X_train, X_test, y_train, y_test = classification_pp()
+
+    # 10-fold cross-validation
+    X = X_train
+    y = y_train
+
+    # Majority Class ==================================================================
+    print("1). Majority Class Classifier")
+    model = DummyClassifier(strategy='most_frequent')
+    y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+    evaluation(y_probs, y)
+
+    # Decision Tree ==================================================================
+    print("\n2). Decision Tree")
+    dt_models = [
+        DecisionTreeClassifier(max_depth=None),
+        DecisionTreeClassifier(criterion='entropy'),
+        DecisionTreeClassifier(max_depth=5),
+        DecisionTreeClassifier(min_samples_split=10),
+    ]
+
+    for model in dt_models:
+        print(f"\nModel: {model}")
+        y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+        evaluation(y_probs, y)
+
+    # Random Forests ==================================================================
+    print("\nRandom Forest")
+
+    rf_models = [
+        RandomForestClassifier(),
+        RandomForestClassifier(n_estimators=200),
+        RandomForestClassifier(n_estimators=50),
+        RandomForestClassifier(max_depth=10),
+    ]
+
+    for model in rf_models:
+        print(f"\nModel: {model}")
+        y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+        evaluation(y_probs, y)
+
     return
-    
+
 def evaluation(y_probs, y_true, *, threshold=0.5, verbose=True):
     """
     Evaluates classification performance using various metrics.
@@ -21,8 +63,8 @@ def evaluation(y_probs, y_true, *, threshold=0.5, verbose=True):
     y_pred = (y_probs >= threshold).astype(int)  # Convert probabilities to binary predictions
 
     accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred)
-    recall = recall_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, zero_division=0) # I've added the zero_division thingy to prevent warning doo-dad
+    recall = recall_score(y_true, y_pred, zero_division=0) # Here too
     auc = roc_auc_score(y_true, y_probs)
     cm = confusion_matrix(y_true, y_pred)
 
@@ -42,4 +84,4 @@ def main():
 
 
 if __name__ == "__main__":
-    classification()
+    main()
