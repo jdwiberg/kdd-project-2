@@ -8,7 +8,7 @@ import time
 import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.utils import resample
-from sklearn.model_selection import train_test_split, cross_val_predict
+from sklearn.model_selection import cross_val_predict
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, accuracy_score, ConfusionMatrixDisplay, confusion_matrix
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.dummy import DummyClassifier, DummyRegressor
@@ -38,7 +38,7 @@ def model_filename(model):
 
 def regression_pp(*, include_stroke = True): # use BMI for regression
     """
-    Preprocesses the dataset for regression tasks. Returns training and testing splits of features and target variable.
+    Preprocesses the dataset for regression tasks. Returns features and target variable.
     If include_stroke is False, the 'stroke' feature will be dropped to prevent data leakage when predicting BMI.
     """
     # drop rows with missing BMI values, since we can't use them for regression
@@ -72,14 +72,12 @@ def regression_pp(*, include_stroke = True): # use BMI for regression
     ).drop(columns=['work_type', 'smoking_status'])
 
     y = X.pop('bmi')
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-    return X_train, X_test, y_train, y_test
+    return X, y
 
 def classification_pp(*, upsample = False): # use stroke for classification
     """
-    Preprocesses the dataset for classification tasks. Returns training and testing splits of features and target variable.
-    If upsample is True, the minority class in the training split will be upsampled to address class imbalance.
+    Preprocesses the dataset for classification tasks. Returns features and target variable.
+    If upsample is True, the minority class will be upsampled to address class imbalance.
     """
     X = dataframe.copy()
 
@@ -107,14 +105,12 @@ def classification_pp(*, upsample = False): # use stroke for classification
     ).drop(columns=['work_type', 'smoking_status'])
 
     y = X.pop('stroke')
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
     if upsample:
-        # upsample the minority class in the training split only
-        X_maj = X_train[y_train == 0]
-        y_maj = y_train[y_train == 0]
-        X_min = X_train[y_train == 1]
-        y_min = y_train[y_train == 1]
+        X_maj = X[y == 0]
+        y_maj = y[y == 0]
+        X_min = X[y == 1]
+        y_min = y[y == 1]
 
         X_min_upsampled, y_min_upsampled = resample(
             X_min,
@@ -124,22 +120,17 @@ def classification_pp(*, upsample = False): # use stroke for classification
             random_state=42,
         )
 
-        # combine the original majority class with the upsampled minority class
-        X_train = pd.concat([X_maj, X_min_upsampled])
-        y_train = pd.concat([y_maj, y_min_upsampled])
+        X = pd.concat([X_maj, X_min_upsampled])
+        y = pd.concat([y_maj, y_min_upsampled])
 
-    return X_train, X_test, y_train, y_test
+    return X, y
 
 def classification(*, save_graphs=False):
     """
     needs to find class probabilites, not predictions, so we can evaluate AUC and choose a threshold for precision/recall
     Use evaluation function to evaluate performance of different models
     """
-    X_train, X_test, y_train, y_test = classification_pp()
-
-    # 10-fold cross-validation
-    X = pd.concat([X_train, X_test])
-    y = pd.concat([y_train, y_test])
+    X, y = classification_pp()
 
     # Majority Class ==================================================================
     print("\n\n\n1). Majority Class Classifier\n--------------")
@@ -226,10 +217,7 @@ def class_evaluation(y_probs, y_true, model, *, threshold=0.5, verbose=True, gra
 
 # Regression ------------------------------------------------------------------------------
 def regression(*, save_graphs=False):
-    X_train, X_test, y_train, y_test = regression_pp()
-
-    X = pd.concat([X_train, X_test])
-    y = pd.concat([y_train, y_test])
+    X, y = regression_pp()
 
     # Majority Class Classifier - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
