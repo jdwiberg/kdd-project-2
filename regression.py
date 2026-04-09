@@ -1,9 +1,119 @@
-from preprocessing import regression_pp # returns attributes and target (X, y) for regression dataset
+# CS 4445 - Project 2
+# Segment: Regression Techniques
+# Group: Shane G. , Jake W. , Victor C.
+# April 4th 2026
+
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import numpy as np
+from preprocessing import regression_pp
+from sklearn.dummy import DummyRegressor, DummyClassifier
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from scipy import stats
 
+
+# Regression ------------------------------------------------------------------------------
 def regression():
-    X, y = regression_pp()
+    X_train, X_test, y_train, y_test = regression_pp()
+
+
+
+    # Majority Class Classifier - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    '''
+    Library Function: DummyClassifier
+    Parameters: strategy='mean' (others: default)
+    Purpose: Make "Baseline" prediction on target value (), based on average target value output (Ignores input features)
+    '''
+    print("1). Creating Baseline")
+    reg = DummyRegressor(strategy='mean'               # Create 'empty' model (switched from 'DummyClassifier' because the value is cont.
+
+                        )
+    reg.fit(X_train, y_train)                           # Train Model (a very dumb model)
+    predictions = reg.predict(X_test)                   # Dumb model makes predictions
+    score1 = reg.score(X_test, y_test)                  # Results
+    print("Score: " , score1)
+
+
+    # Linear Regression - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    '''
+    Library Function: LinearRegression
+    Parameters: Default
+    Purpose: Find line of best fit, and produce prediction equation (sum of attributes with weighted coefficients)
+    '''
+    print("\n2).Linear Regression")
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score2 = model.score(X_test, y_test)
+    print("Score: " , score2)
+
+    # Regression Trees - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    '''
+    Library Function: DecisionTreeRegressor
+    Parameters: Default
+    Purpose: 
+    '''
+    print("\n3). Decision Tree")
+    model = DecisionTreeRegressor()
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score3 = model.score(X_test, y_test)
+    print("Score: " , score3)
+
+    # Random Forest - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    '''
+    Library Function: RandomForestClassifier
+    Parameters: 
+    Purpose: 
+    '''
+    print("\n4). Random Forest")
+
+    print("\nExperiment #1: n_estimators = 100")
+    model = RandomForestRegressor(n_estimators = 100)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score4a = model.score(X_test, y_test)
+    print("Score: " , score4a)
+
+    print("\nExperiment #2: n_estimators = 50")
+    model = RandomForestRegressor(n_estimators = 50)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score4b = model.score(X_test, y_test)
+    print("Score: ", score4b)
+
+    print("\nExperiment #3: max_depth = none")
+    model = RandomForestRegressor()
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score4c = model.score(X_test, y_test)
+    print("Score: ", score4c)
+
+    print("\nExperiment #4: max_depth = none")
+    model = RandomForestRegressor(max_depth = 10)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    corr, _ = stats.pearsonr(y_test, predictions)
+    print("Correlation Coefficient: ", corr)
+    score4d = model.score(X_test, y_test)
+    print("Score: ", score4d)
+
+    print("\nRegression Section Complete")
     return
     
 
@@ -33,4 +143,4 @@ def main():
     regression()
     
 if __name__ == "__main__":
-    regression()
+    main()
