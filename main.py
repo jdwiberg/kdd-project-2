@@ -7,8 +7,9 @@ from scipy import stats
 import time
 import matplotlib.pyplot as plt
 from pathlib import Path
+from sklearn.base import clone
 from sklearn.utils import resample
-from sklearn.model_selection import cross_val_predict
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, accuracy_score, ConfusionMatrixDisplay, confusion_matrix
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.dummy import DummyClassifier, DummyRegressor
@@ -35,6 +36,83 @@ FIGURES_DIR = Path("figures")
 
 def model_filename(model):
     return str(model).replace("(", "_").replace(")", "").replace(", ", "_").replace("=", "-").replace(" ", "_")
+
+def save_classification_group(results, filename, title):
+    if not results:
+        return
+
+    FIGURES_DIR.mkdir(exist_ok=True)
+    fig, axes = plt.subplots(1, len(results), figsize=(5 * len(results), 4))
+    if len(results) == 1:
+        axes = [axes]
+
+    for ax, result in zip(axes, results):
+        ConfusionMatrixDisplay(result["cm"]).plot(ax=ax, colorbar=False)
+        ax.set_title(str(result["model"]))
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / filename, bbox_inches="tight")
+    plt.close(fig)
+
+def save_regression_group(results, y_true, filename, title):
+    if not results:
+        return
+
+    FIGURES_DIR.mkdir(exist_ok=True)
+    fig, axes = plt.subplots(1, len(results), figsize=(5 * len(results), 4))
+    if len(results) == 1:
+        axes = [axes]
+
+    for ax, result in zip(axes, results):
+        y_pred = result["y_pred"]
+        min_val = min(y_true.min(), y_pred.min())
+        max_val = max(y_true.max(), y_pred.max())
+        ax.scatter(y_true, y_pred, alpha=0.6)
+        ax.plot([min_val, max_val], [min_val, max_val], 'r--')
+        ax.set_xlabel("Actual BMI")
+        ax.set_ylabel("Predicted BMI")
+        ax.set_title(str(result["model"]))
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / filename, bbox_inches="tight")
+    plt.close(fig)
+
+def classification_cv_predict_proba(model, X, y, *, upsample=False, n_splits=10):
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+    if not upsample:
+        return cross_val_predict(model, X, y, cv=cv, method='predict_proba')[:, 1]
+
+    y_probs = np.zeros(len(y), dtype=float)
+
+    for train_idx, test_idx in cv.split(X, y):
+        X_train = X.iloc[train_idx]
+        y_train = y.iloc[train_idx]
+        X_test = X.iloc[test_idx]
+
+        X_maj = X_train[y_train == 0]
+        y_maj = y_train[y_train == 0]
+        X_min = X_train[y_train == 1]
+        y_min = y_train[y_train == 1]
+
+        X_min_upsampled, y_min_upsampled = resample(
+            X_min,
+            y_min,
+            replace=True,
+            n_samples=len(y_maj),
+            random_state=42,
+        )
+
+        X_train_balanced = pd.concat([X_maj, X_min_upsampled])
+        y_train_balanced = pd.concat([y_maj, y_min_upsampled])
+
+        fitted_model = clone(model)
+        fitted_model.fit(X_train_balanced, y_train_balanced)
+        y_probs[test_idx] = fitted_model.predict_proba(X_test)[:, 1]
+
+    return y_probs
 
 def regression_pp(*, include_stroke = True): # use BMI for regression
     """
@@ -106,26 +184,9 @@ def classification_pp(*, upsample = False): # use stroke for classification
 
     y = X.pop('stroke')
 
-    if upsample:
-        X_maj = X[y == 0]
-        y_maj = y[y == 0]
-        X_min = X[y == 1]
-        y_min = y[y == 1]
-
-        X_min_upsampled, y_min_upsampled = resample(
-            X_min,
-            y_min,
-            replace=True,  # Sample with replacement
-            n_samples=len(y_maj),  # Match number of maj samples
-            random_state=42,
-        )
-
-        X = pd.concat([X_maj, X_min_upsampled])
-        y = pd.concat([y_maj, y_min_upsampled])
-
     return X, y
 
-def classification(*, save_graphs=False):
+def classification(*, save_graphs=False, upsample=True):
     """
     needs to find class probabilites, not predictions, so we can evaluate AUC and choose a threshold for precision/recall
     Use evaluation function to evaluate performance of different models
@@ -135,11 +196,12 @@ def classification(*, save_graphs=False):
     # Majority Class ==================================================================
     print("\n\n\n1). Majority Class Classifier\n--------------")
     model = DummyClassifier(strategy='most_frequent')
+    majority_model = model
     start = time.perf_counter_ns()
-    y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+    y_probs = classification_cv_predict_proba(model, X, y, upsample=upsample)
     dt = time.perf_counter_ns() - start
     print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
-    class_evaluation(y_probs, y, model, save_graphs=save_graphs)
+    majority_result = class_evaluation(y_probs, y, model, save_graphs=save_graphs)
 
     # Decision Tree ==================================================================
     print("\n2). Decision Tree\n------------------------")
@@ -151,18 +213,20 @@ def classification(*, save_graphs=False):
         DecisionTreeClassifier(min_samples_split=10),
         
     ]
+    dt_results = []
 
     for model in dt_models:
         print(f"\nModel: {model}")
         start = time.perf_counter_ns()
-        y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+        y_probs = classification_cv_predict_proba(model, X, y, upsample=upsample)
         dt = time.perf_counter_ns() - start
         print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
         model.fit(X, y)
         print("Node count:", model.tree_.node_count)
         print("Depth:", model.tree_.max_depth)
         print("Leaf count:", model.tree_.n_leaves)
-        class_evaluation(y_probs, y, model, save_graphs=save_graphs)
+        result = class_evaluation(y_probs, y, model, save_graphs=save_graphs)
+        dt_results.append({"model": model, "cm": result[4]})
         
 
     # Random Forests ==================================================================
@@ -175,16 +239,35 @@ def classification(*, save_graphs=False):
         RandomForestClassifier(n_estimators=50),
         RandomForestClassifier(max_depth=10),
     ]
+    rf_results = []
 
     for model in rf_models:
         print(f"\nModel: {model}")
         start = time.perf_counter_ns()
-        y_probs = cross_val_predict(model, X, y, cv=10, method='predict_proba')[:, 1]
+        y_probs = classification_cv_predict_proba(model, X, y, upsample=upsample)
         dt = time.perf_counter_ns() - start
         print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
-        class_evaluation(y_probs, y, model, save_graphs=save_graphs)
+        result = class_evaluation(y_probs, y, model, save_graphs=save_graphs)
+        rf_results.append({"model": model, "cm": result[4]})
 
-def class_evaluation(y_probs, y_true, model, *, threshold=0.5, verbose=True, graph=True, save_graphs=False):
+    if save_graphs:
+        save_classification_group(
+            [{"model": majority_model, "cm": majority_result[4]}],
+            "classification_majority_class.png",
+            "Classification: Majority Classifier",
+        )
+        save_classification_group(
+            dt_results,
+            "classification_decision_trees.png",
+            "Classification: Decision Trees",
+        )
+        save_classification_group(
+            rf_results,
+            "classification_random_forests.png",
+            "Classification: Random Forests",
+        )
+
+def class_evaluation(y_probs, y_true, model, *, threshold=0.5, verbose=True, graph=False, save_graphs=False):
     """
     Evaluates classification performance using various metrics.
     Returns a tuple of (accuracy, precision, recall, AUC, confusion matrix).
@@ -207,9 +290,6 @@ def class_evaluation(y_probs, y_true, model, *, threshold=0.5, verbose=True, gra
     if graph:
         ConfusionMatrixDisplay.from_predictions(y_true, y_pred)
         plt.title(f"Confusion Matrix, {model}")
-        if save_graphs:
-            FIGURES_DIR.mkdir(exist_ok=True)
-            plt.savefig(FIGURES_DIR / f"classification_confusion_matrix_{model_filename(model)}.png", bbox_inches="tight")
         plt.show()
 
     return (accuracy, precision, recall, auc, cm)
@@ -233,6 +313,7 @@ def regression(*, save_graphs=False):
     dt = time.perf_counter_ns() - start
     print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
     reg_evaluation(predictions, y, reg, save_graphs=save_graphs)
+    baseline_results = [{"model": reg, "y_pred": predictions}]
 
 
     # Linear Regression - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -244,6 +325,7 @@ def regression(*, save_graphs=False):
     '''
     print("Linear Regression\n----------------")
     mdls = [LinearRegression(), LinearRegression(fit_intercept=False)]
+    linear_results = []
     for model in mdls:
         print(f"Model: {model}")
         start = time.perf_counter_ns()
@@ -251,6 +333,7 @@ def regression(*, save_graphs=False):
         dt = time.perf_counter_ns() - start
         print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
         reg_evaluation(predictions, y, model, save_graphs=save_graphs)
+        linear_results.append({"model": model, "y_pred": predictions})
 
     # Regression Trees - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -261,6 +344,7 @@ def regression(*, save_graphs=False):
     '''
     mdls = [DecisionTreeRegressor(), DecisionTreeRegressor(criterion='poisson'), DecisionTreeRegressor(splitter='random')]
     print("\nDecision Trees\n-------------------")
+    dt_results = []
 
     for model in mdls:
         print(f"Model: {model}")
@@ -273,6 +357,7 @@ def regression(*, save_graphs=False):
         print("Depth:", model.tree_.max_depth)
         print("Leaf count:", model.tree_.n_leaves)
         reg_evaluation(predictions, y, model, save_graphs=save_graphs)
+        dt_results.append({"model": model, "y_pred": predictions})
 
     # Random Forest - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -283,6 +368,7 @@ def regression(*, save_graphs=False):
     '''
     print("\nRandom Forests\n----------------")
     mdls = [RandomForestRegressor(), RandomForestRegressor(max_depth=5), RandomForestRegressor(n_estimators=50), RandomForestRegressor(criterion='poisson')]
+    rf_results = []
     for model in mdls:
         print(f"Model: {model}")
         start = time.perf_counter_ns()
@@ -290,6 +376,33 @@ def regression(*, save_graphs=False):
         dt = time.perf_counter_ns() - start
         print(f"10-fold CV time: {dt / 1_000_000:.3f} ms")
         reg_evaluation(predictions, y, model, save_graphs=save_graphs)
+        rf_results.append({"model": model, "y_pred": predictions})
+
+    if save_graphs:
+        save_regression_group(
+            baseline_results,
+            y,
+            "regression_baseline.png",
+            "Regression: Baseline",
+        )
+        save_regression_group(
+            linear_results,
+            y,
+            "regression_linear_models.png",
+            "Regression: Linear Regression",
+        )
+        save_regression_group(
+            dt_results,
+            y,
+            "regression_decision_trees.png",
+            "Regression: Decision Trees",
+        )
+        save_regression_group(
+            rf_results,
+            y,
+            "regression_random_forests.png",
+            "Regression: Random Forests",
+        )
 
     print("\nRegression Section Complete")
     return
@@ -323,9 +436,6 @@ def reg_evaluation(y_pred, y_true, model, *, verbose=True, graph=True, save_grap
         plt.xlabel("Actual BMI")
         plt.ylabel("Predicted BMI")
         plt.title(f"Predicted vs Actual BMI, {model}")
-        if save_graphs:
-            FIGURES_DIR.mkdir(exist_ok=True)
-            plt.savefig(FIGURES_DIR / f"regression_predicted_vs_actual_{model_filename(model)}.png", bbox_inches="tight")
         plt.show()
 
     return (correlation_coef, mae, mse, rmse, r2)
@@ -336,7 +446,7 @@ def main():
     parser.add_argument("--save-graphs", action="store_true")
     args = parser.parse_args()
 
-    regression(save_graphs=args.save_graphs)
+    # regression(save_graphs=args.save_graphs)
     classification(save_graphs=args.save_graphs)
     
 if __name__ == "__main__":
